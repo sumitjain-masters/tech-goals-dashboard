@@ -369,13 +369,14 @@ async function doFetch(csvUrl){
   btn.disabled = true;
   setSheetStatus('loading', 'Loading…');
   try{
-    const res = await fetch(csvUrl);
+    const bustUrl = csvUrl + (csvUrl.includes('?') ? '&' : '?') + '_=' + Date.now();
+    const res = await fetch(bustUrl, {cache: 'no-store'});
     if(!res.ok) throw new Error('HTTP ' + res.status + ' — make sure the sheet is published');
     const parsed = parseCSV(await res.text());
     if(!parsed.length) throw new Error('No data rows found — check the sheet is published and the Goals tab is selected');
     RAW = parsed;
-    const ts = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
-    setSheetStatus('ok', 'Live · synced at ' + ts);
+    const ts = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    setSheetStatus('ok', 'Live · ' + parsed.length + ' rows · synced at ' + ts);
     document.getElementById('hdr-ts').textContent = 'live · ' + ts;
     localStorage.setItem('mi_sheet_url', document.getElementById('sheet-url').value);
     boot();
