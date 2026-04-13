@@ -138,7 +138,15 @@
   .sheet-clear{font-size:11px;color:var(--text-tertiary);background:none;border:none;cursor:pointer;padding:0;font-family:inherit;text-decoration:underline}
   .sheet-clear:hover{color:var(--red)}
 
-  /* Sync banner (kept for legacy) */
+  /* Source tabs */
+  .src-tabs{display:flex;gap:0;border:1px solid var(--border-strong);border-radius:var(--r-sm);overflow:hidden;flex-shrink:0}
+  .src-tab{font-size:11px;font-weight:500;padding:5px 12px;cursor:pointer;border:none;background:var(--surface);color:var(--text-tertiary);font-family:inherit;transition:background .15s,color .15s;white-space:nowrap}
+  .src-tab:first-child{border-right:1px solid var(--border-strong)}
+  .src-tab.on{background:var(--accent);color:#fff}
+  /* CSV upload button */
+  .csv-label{font-size:12px;font-weight:500;padding:6px 14px;border-radius:var(--r-sm);border:1px solid var(--border-strong);background:var(--surface);color:var(--text-primary);cursor:pointer;font-family:inherit;transition:background .15s;white-space:nowrap}
+  .csv-label:hover{background:var(--surface2)}
+  #csv-file-input{display:none}
   .sync{display:flex;align-items:center;gap:10px;background:var(--blue-bg);border:1px solid rgba(55,138,221,.2);border-radius:var(--r-md);padding:10px 16px;margin-bottom:16px;font-size:12px;color:var(--blue)}
   .sync.err{background:var(--red-bg);border-color:rgba(226,75,74,.2);color:var(--red)}
   .sync-dot{width:7px;height:7px;border-radius:50%;background:var(--blue-mid);animation:pulse 2s infinite;flex-shrink:0}
@@ -168,9 +176,18 @@
 </header>
 
 <div class="sheet-row" id="sheet-row">
-  <label>Google Sheet</label>
-  <input class="sheet-input" id="sheet-url" type="url" placeholder="Paste your Google Sheets link here…" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vR8DNJZwdzjT87pwsO1NqPOQ0b8KtlzeWxrkkzz5j4Tnk-vJYuK5deXRHfvO6daoJ9v1NbnerNrOtnY/pub?output=csv" />
-  <button class="sheet-btn" id="sheet-load-btn" onclick="loadFromInput()">Load live</button>
+  <div class="src-tabs">
+    <button class="src-tab on" id="tab-url" onclick="switchTab('url')">Google Sheets</button>
+    <button class="src-tab" id="tab-csv" onclick="switchTab('csv')">Upload CSV</button>
+  </div>
+  <div id="src-url" style="display:flex;align-items:center;gap:8px;flex:1">
+    <input class="sheet-input" id="sheet-url" type="url" placeholder="Paste your Google Sheets published CSV link…" value="https://docs.google.com/spreadsheets/d/e/2PACX-1vR8DNJZwdzjT87pwsO1NqPOQ0b8KtlzeWxrkkzz5j4Tnk-vJYuK5deXRHfvO6daoJ9v1NbnerNrOtnY/pub?output=csv" />
+    <button class="sheet-btn" id="sheet-load-btn" onclick="loadFromInput()">Load live</button>
+  </div>
+  <div id="src-csv" style="display:none;align-items:center;gap:8px">
+    <label class="csv-label" for="csv-file-input">Choose CSV file…</label>
+    <input type="file" id="csv-file-input" accept=".csv" onchange="loadFromCSV(this)">
+  </div>
   <div class="sheet-status" id="sheet-status" style="display:none"></div>
   <button class="sheet-clear" id="sheet-clear-btn" onclick="clearSheet()" style="display:none">Clear</button>
 </div>
@@ -405,6 +422,38 @@ async function doFetch(csvUrl){
   }
 }
 
+function switchTab(tab){
+  const isUrl = tab === 'url';
+  document.getElementById('tab-url').classList.toggle('on', isUrl);
+  document.getElementById('tab-csv').classList.toggle('on', !isUrl);
+  document.getElementById('src-url').style.display = isUrl ? 'flex' : 'none';
+  document.getElementById('src-csv').style.display = isUrl ? 'none' : 'flex';
+  document.getElementById('sheet-status').style.display = 'none';
+}
+
+function loadFromCSV(input){
+  const file = input.files[0];
+  if(!file) return;
+  setSheetStatus('loading', 'Reading ' + file.name + '…');
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try{
+      const parsed = parseCSV(e.target.result);
+      if(!parsed.length) throw new Error('No data rows found — check your CSV has a header row and goal data');
+      RAW = parsed;
+      const ts = new Date().toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      setSheetStatus('ok', file.name + ' · ' + parsed.length + ' rows · loaded at ' + ts);
+      document.getElementById('hdr-ts').textContent = file.name + ' · ' + ts;
+      document.getElementById('sheet-clear-btn').style.display = 'inline';
+      boot();
+    }catch(err){
+      setSheetStatus('err', err.message);
+    }
+  };
+  reader.onerror = () => setSheetStatus('err', 'Failed to read file');
+  reader.readAsText(file);
+}
+
 function loadFromInput(){
   const raw = document.getElementById('sheet-url').value.trim();
   if(!raw){ setSheetStatus('err','Please paste a Google Sheets URL first'); return; }
@@ -465,11 +514,11 @@ function renderAlerts(){
 }
 
 function dc(id){ if(CH[id]){CH[id].destroy();delete CH[id];} }
-const SC={'Done':'#639922','In Progress':'#378ADD','Pending':'#888780','Review':'#7F77DD','Overdue':'#E24B4A','At risk':'#EF9F27','Not set':'#B4B2A9'};
+const SC={'Done':'#639922','In Progress':'#378ADD','Pending':'#888780','Review':'#7F77DD','Overdue':'#E24B4A','Due soon':'#EF9F27','Not set':'#B4B2A9'};
 
 function renderCharts(){
   const d=view();
-  const sm={}; d.forEach(r=>{let s=r.status||'Not set';if(isOv(r))s='Overdue';else if(isRisk(r))s='At risk';sm[s]=(sm[s]||0)+1;});
+  const sm={}; d.forEach(r=>{let s=r.status||'Not set';if(isOv(r))s='Overdue';else if(isSoon(r))s='Due soon';sm[s]=(sm[s]||0)+1;});
   const sl=Object.keys(sm);
   document.getElementById('leg-s').innerHTML=sl.map(k=>`<div class="leg-i"><span class="leg-sq" style="background:${SC[k]||'#888'}"></span>${k} <strong style="margin-left:3px">${sm[k]}</strong></div>`).join('');
   dc('s'); CH['s']=new Chart(document.getElementById('cs'),{type:'doughnut',data:{labels:sl,datasets:[{data:sl.map(k=>sm[k]),backgroundColor:sl.map(k=>SC[k]||'#888'),borderWidth:3,borderColor:'#fff'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},cutout:'62%'}});
@@ -502,7 +551,7 @@ function populateFilters(){
 function sbadge(r){
   if(r.status==='Done') return '<span class="badge b-done">Done</span>';
   if(isOv(r)) return '<span class="badge b-ov">Overdue</span>';
-  if(isRisk(r)) return '<span class="badge b-risk">At risk</span>';
+  if(isSoon(r)) return '<span class="badge b-risk">Due soon</span>';
   if(r.status==='In Progress') return '<span class="badge b-ip">In progress</span>';
   if(r.status==='Review') return '<span class="badge b-rev">Review</span>';
   if(r.status==='Pending') return '<span class="badge b-pend">Pending</span>';
