@@ -228,6 +228,8 @@
     <div class="t-bar">
       <span class="t-lbl">Product</span>
       <select class="t-sel" id="fp" onchange="renderTable()"></select>
+      <span class="t-lbl">Category</span>
+      <select class="t-sel" id="fc" onchange="renderTable()"></select>
       <span class="t-lbl">Status</span>
       <select class="t-sel" id="fs" onchange="renderTable()"></select>
       <span class="t-lbl">Owner</span>
@@ -312,9 +314,24 @@ let activeMonth = 'April';
 let CH = {};
 
 function pn(r){ return (r.product && r.product!=='-' && r.product.trim()) ? r.product.trim() : 'Cross-team'; }
+
+/* Computed timing — never reads onTime column */
 function isOv(r){ return r.due && new Date(r.due)<TODAY && r.status!=='Done'; }
-function isRisk(r){ return r.onTime==='At Risk'; }
-function isSoon(r){ if(!r.due||r.status==='Done') return false; return (new Date(r.due)-TODAY)/86400000<=3 && (new Date(r.due)-TODAY)/86400000>=0; }
+function isSoon(r){ if(!r.due||r.status==='Done') return false; const d=(new Date(r.due)-TODAY)/86400000; return d>=0&&d<=3; }
+function timingLabel(r){
+  if(!r.due) return {label:'—', cls:'ot-d'};
+  const due=new Date(r.due);
+  const completedOn=r.completionDate ? new Date(r.completionDate) : null;
+  if(r.status==='Done'){
+    if(completedOn && completedOn<=due) return {label:'On time', cls:'ot-y'};
+    if(completedOn && completedOn>due)  return {label:'Late', cls:'ot-n'};
+    return {label:'Done', cls:'ot-y'};
+  }
+  if(due<TODAY) return {label:'Overdue', cls:'ot-n'};
+  if(isSoon(r))  return {label:'At risk', cls:'ot-r'};
+  return {label:'On track', cls:'ot-d'};
+}
+
 function fmt(d){ return d ? new Date(d).toLocaleDateString('en-IN',{day:'numeric',month:'short'}) : '—'; }
 
 function parseCSV(txt){
@@ -324,7 +341,7 @@ function parseCSV(txt){
     const v=[]; let c='',q=false;
     for(const ch of line){ if(ch==='"'){q=!q;continue;} if(ch===','&&!q){v.push(c.trim());c='';continue;} c+=ch; } v.push(c.trim());
     const row={}; hdrs.forEach((h,i)=>row[h]=v[i]||'');
-    return {month:row['month']||'',product:row['product']||'',goal:row['goal']||'',owner:row['owner']||'',due:row['due date']||row['due']||'',category:row['category']||'',status:row['status']||'',onTime:row['on time']||'',reason:row['reason for miss']||''};
+    return {month:row['month']||'',product:row['product']||'',goal:row['goal']||'',owner:row['owner']||'',due:row['due date']||row['due']||'',category:row['category']||'',status:row['status']||'',completionDate:row['completion date']||'',reason:row['reason for miss']||''};
   }).filter(r=>r.goal);
 }
 
@@ -379,6 +396,8 @@ async function doFetch(csvUrl){
     setSheetStatus('ok', 'Live · ' + parsed.length + ' rows · synced at ' + ts);
     document.getElementById('hdr-ts').textContent = 'live · ' + ts;
     localStorage.setItem('mi_sheet_url', document.getElementById('sheet-url').value);
+    btn.disabled = false;
+    btn.textContent = '⟳ Refresh';
     boot();
   }catch(e){
     setSheetStatus('err', e.message);
@@ -435,13 +454,13 @@ function computeMetrics(){
   document.getElementById('m-done').textContent=done;
   document.getElementById('m-done-pct').textContent=d.length?Math.round(done/d.length*100)+'% of view':'—';
   document.getElementById('m-ov').textContent=d.filter(isOv).length;
-  document.getElementById('m-risk').textContent=d.filter(r=>isRisk(r)&&!isOv(r)).length;
+  document.getElementById('m-risk').textContent=d.filter(r=>isSoon(r)&&!isOv(r)).length;
 }
 
 function renderAlerts(){
   const d=view(); let html='';
   d.filter(isOv).forEach(r=>{ html+=`<div class="a-item a-danger"><div class="a-dot"></div><div><div class="a-title">${r.goal}<span class="a-tag">OVERDUE</span></div><div class="a-meta">${r.owner} · ${pn(r)} · Due ${fmt(r.due)}${r.reason?' · '+r.reason:''}</div></div></div>`; });
-  d.filter(r=>isRisk(r)&&!isOv(r)).forEach(r=>{ html+=`<div class="a-item a-warn"><div class="a-dot"></div><div><div class="a-title">${r.goal}<span class="a-tag">AT RISK</span></div><div class="a-meta">${r.owner} · ${pn(r)} · Due ${fmt(r.due)}</div></div></div>`; });
+  d.filter(r=>isSoon(r)&&!isOv(r)).forEach(r=>{ html+=`<div class="a-item a-warn"><div class="a-dot"></div><div><div class="a-title">${r.goal}<span class="a-tag">DUE SOON</span></div><div class="a-meta">${r.owner} · ${pn(r)} · Due ${fmt(r.due)}</div></div></div>`; });
   document.getElementById('alerts').innerHTML=html||'<p style="font-size:13px;color:var(--text-tertiary);padding:4px 0">No overdue or at-risk goals.</p>';
 }
 
@@ -471,9 +490,11 @@ function renderCharts(){
 
 function populateFilters(){
   const prods=[...new Set(RAW.map(r=>pn(r)))].sort();
+  const cats=[...new Set(RAW.map(r=>r.category||'').filter(Boolean))].sort();
   const stats=[...new Set(RAW.map(r=>r.status||'Not set'))].sort();
   const ownrs=[...new Set(RAW.flatMap(r=>r.owner.split('/').map(o=>o.trim())))].filter(Boolean).sort();
   document.getElementById('fp').innerHTML='<option value="">All products</option>'+prods.map(p=>`<option value="${p}">${p}</option>`).join('');
+  document.getElementById('fc').innerHTML='<option value="">All categories</option>'+cats.map(c=>`<option value="${c}">${c}</option>`).join('');
   document.getElementById('fs').innerHTML='<option value="">All statuses</option>'+stats.map(s=>`<option value="${s}">${s}</option>`).join('');
   document.getElementById('fo').innerHTML='<option value="">All owners</option>'+ownrs.map(o=>`<option value="${o}">${o}</option>`).join('');
 }
@@ -490,10 +511,12 @@ function sbadge(r){
 
 function renderTable(){
   const fp=document.getElementById('fp').value;
+  const fc=document.getElementById('fc').value;
   const fs=document.getElementById('fs').value;
   const fo=document.getElementById('fo').value;
   const rows=view().filter(r=>{
     if(fp&&pn(r)!==fp) return false;
+    if(fc&&(r.category||'')!==fc) return false;
     if(fs&&(r.status||'Not set')!==fs) return false;
     if(fo&&!r.owner.toLowerCase().includes(fo.toLowerCase())) return false;
     return true;
@@ -504,7 +527,8 @@ function renderTable(){
   tb.innerHTML=rows.map(r=>{
     const ov=isOv(r),sn=isSoon(r);
     const dc2=ov?'due-ov':sn?'due-sn':'due-ok';
-    const ot=r.onTime==='Yes'?'<span class="ot-y">Yes</span>':r.onTime==='No'?'<span class="ot-n">No</span>':r.onTime==='At Risk'?'<span class="ot-r">At risk</span>':'<span class="ot-d">—</span>';
+    const tl=timingLabel(r);
+    const ot=`<span class="${tl.cls}">${tl.label}</span>`;
     return `<tr class="${ov?'ov':''}"><td>${r.month}</td><td>${pn(r)}</td><td title="${r.goal}" style="font-weight:500">${r.goal}</td><td style="color:var(--text-secondary)">${r.owner}</td><td class="${dc2}">${fmt(r.due)}</td><td style="color:var(--text-secondary)">${r.category||'—'}</td><td>${sbadge(r)}</td><td>${ot}</td></tr>`;
   }).join('');
 }
